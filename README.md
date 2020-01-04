@@ -9,10 +9,11 @@ Use [this repositories issues](https://github.com/jhkennedy/JORNL/issues)
 to ask questions, get clarification, etc. about any 
 of these. 
 
-## LIVVkit
+# LIVVkit
 
-LIVVkit, as a project, has two basic parts. verification of Ice Sheet Models 
-(ISMs) and validation of ISMs. Right now, LIVVkit is funded through the ProbSLR
+LIVVkit, as a project, has three basic parts. verification of Ice Sheet Models 
+(ISMs), validation of ISMs, and general software engineering/devOps tasks. 
+Right now, LIVVkit is funded through the ProbSLR
 project, and so is only *supporting* (ish) the MALI and BISICLES ISMs.  
 
 ## Verification
@@ -168,12 +169,173 @@ and report that status to the [LIVVkit CDASH board](https://my.cdash.org/index.p
 * **Report notification:** I believe, once things are reporting to CDASH, you can set it up
   to send emails to interested parties if things fail or not (or daily digests, even)
 
+## Verification
 
-## EVV 
+## SE/DevOps
+
+This section is just a collection of some need-to-know Software Enginnering and DevOps things,
+like how to release a new version of LIVVkit. 
+
+### LIVVkit Release Steps
+
+1. Open a PR from `develop` to `master` and ask for a least one reviewer. You'll want to 
+   write a detailed discussion of the changes in this release (and why) which you'll likely 
+   use for both the merge commit message and the release notes. Then check:
+   * all tests pass
+   * you've bumped the version number appropriately
+   
+1. Test LEX and EVV with this new release. If either break, this should be a major release!
+
+1. Merge the release using the PR discussion to write an informative merge commit message 
+   (look back at previous release commits for an example)
+
+1. publish the release on Github -- again use the PR discussion to write an informative 
+   release note (look back at previous release notes for examples)
+
+1. Publish to PyPI (the python packaging index)
+   * For reference, most of the steps are outlined here: https://packaging.python.org/tutorials/packaging-projects/
+   * Add a `.pypirc` to your home directory that looks like:
+     ```ini
+     [distutils]
+     index-servers =
+       pypi
+       test
+    
+     [pypi]
+     username=jhkennedy
+    
+     [test]
+     repository=https://test.pypi.org/legacy/
+     username=jhkennedy
+     ```
+     where you've replace my username with yours.
+      
+   * Update your environment with the needed packaging tools: 
+     ```bash
+     pip install --user --upgrade setuptools wheel twine
+     ```
+   * From the top of the LIVVkit repo, build your package: 
+     ```bash
+     git fetch --all
+     git checkout master
+     git pull --ff-only
+     python setup.py sdist bdist_wheel
+     ```
+   * Upload to the test PyPI site
+     ```bash
+     twine upload -r test dist/*
+     ```
+     and check that everything looks good on the package site (URL will be printed by twine).
+   * Create a new env and test the install of LIVVkit from the test PyPI site
+     ```bash
+     conda env create -n livv-3.0.0-test -f LIVVkit.yml
+     conda activate livv-3.0.0-test
+     pip install --index-url https://test.pypi.org/simple/ --no-deps livvkit
+     livv -v tests/_data/cism-2.0.0-tests/titan-gnu/CISM_glissade \
+             tests/_data/cism-2.0.6-tests/titan-gnu/CISM_glissade \
+             -o tests/vv_test -s -p 3
+     ```
+   * When everything looks good, upload to the production PyPI site:
+     ```bash
+     twine upload -r pypi dist/*
+     ```
+1. Update the example website. Since you (should have) just ran a verification test, we'll
+   use that to update the example website. The example website lives in the `gh-pages` branch, 
+   but, because it's an orphaned branch it's best to clone just that branch.      
+   
+   So, lets say the LIVVkit repo is located at `${LIVVKIT}` and you want the `gh-pages` clone to 
+   be at `${LIVVKIT_EXAMPLE}`:
+   ```bash
+   git clone --single-branch --branch gh-pages git@github.com:LIVVkit/LIVVkit.git ${LIVVKIT_EXAMPLE}
+   cd ${LIVVKIT_EXAMPLE}
+   # blow away the old website
+   rm -r ./*  # CAREFUL
+   # get the new example website
+   cp -r ${LIVVKIT}/tests/vv_test/* .
+   git add .
+   # check it looks okay
+   git status
+   # looks good, so
+   git commit -m "LIVVkit 3.0.0 Example"
+   git push
+   ```
+   Now, after a few minutes, you should see the new website up at http://livvkit.github.io/LIVVkit/
+   
+1. Update the docs. Because we used the `gh-pages` branch for the example website, we host the
+   at https://livvkit.github.io/Docs/, and updating this will be similar to the example website.
+   First, let's build the docs:
+   ```bash
+   cd ${LIVVKIT}
+   # Make sure the livv-3.0.0-test env we created earlier is active
+   conda activate livv-3.0.0-test
+   # uninstall our version from the test pypi site
+   pip uninstall livvkit
+   # install a develop/editable version
+   pip install -e .[develop]
+   # now, the docs!
+   cd docs
+   ./generate_docs.sh
+   ``` 
+   Now, we need to grab the `gh-pages` branch from the https://github.com/LIVVkit/Docs repo
+   -- we'll place it in `${LIVVKIT_DOCS}` -- and then update the docs. 
+   ```bash
+   git clone --single-branch --branch gh-pages git@github.com:LIVVkit/Docs.git ${LIVVKIT_DOCS}
+   cd ${LIVVKIT_DOCS}
+   # blow away the old docs
+   rm -r ./*  # CAREFUL
+   # get the new example website
+   cp -r ${LIVVKIT}/docs/_build/html/* .
+   git add .
+   # check it looks okay
+   git status
+   # looks good, so
+   git commit -m "LIVVkit 3.0.0 Docs"
+   git push
+   ```
+   Now, after a few minutes, you should see the new docs up at http://livvkit.github.io/Docs/
+   
+   *Note: it might be worth switching to https://readthedocs.org/ or similar...*
+   
+1. Merge master into dev and bump version number in `develop` to next target
+   ```bash
+   git checkout develop
+   git merge --ff-only master
+   # Edit version number to next target, e.g.: __version_info__ = (3, 1, 0)
+   vim livvkit/__init__.py
+   git add livvkit/__init__.py
+   git commit -m "Bump version to next target: v3.1.0"
+   git push
+   ```
+1. Update the conda-forge LIVVkit feedstock
+   * Once the new released is pushed to PyPI, conda-forge's `regro-cf-autotick-bot` should 
+     see the new release and open a PR to update the recipe, e.g.: 
+         https://github.com/conda-forge/livvkit-feedstock/pull/2
+     it usually only takes a few minutes, but may take up to ~24 hours. If you're 
+     listed as a package maintainer on conda-forge for LIVVkit, you'll get an 
+     email when it happens.
+   * Once it's open, determine if changes need to be made. If so:
+     * clone the bot's fork of the livvkit-feedstock, and check out the branch 
+       (will say what branch and the fork location at the bottom of the PR!):
+       ```bash
+       git clone https://github.com/regro-cf-autotick-bot/livvkit-feedstock
+       cd livvkit-feedstock
+       git checkout 3.0.0
+       ```
+       make your changes, push them, and then rerender the feedstock. NOTE: make sure
+       to add yourself as a maintainer to the recipe!  
+     * once all tests pass, you can merge it into the feedstock. 
+     
+1. Request new LIVVkit version be included in the next `e3sm_unified` version here:
+   https://acme-climate.atlassian.net/wiki/spaces/EIDMG/pages/129732419/Packages+in+the+E3SM+Unified+conda+environment
+
+1. If/Once EVV works with this release, request new LIVVkit version be included in 
+   the next `cime_env` version here: https://github.com/E3SM-Project/e3sm-unified/blob/master/recipes/cime-env/meta.yaml
+   
+# EVV 
 
 
 
-## E3SM Core Efforts
+# E3SM Core Efforts
 
 
 
